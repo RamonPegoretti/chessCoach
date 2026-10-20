@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Stockfish build copied in on install.
+    "public/engine/**",
   ]),
 ]);
 
