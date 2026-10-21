@@ -4,8 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as db from "@/lib/db";
 import type { Account } from "@/lib/db";
 import { accountKey, importChesscom, importLichess, parsePgnText } from "@/lib/importers";
-import { analyzeGame } from "@/lib/analysis";
-import type { Source, StoredGame } from "@/lib/types";
+import { analyzeGame, OpeningCache } from "@/lib/analysis";
+import { engineCount, getBrowserEngine } from "@/lib/engine";
+import type { GameAnalysis, Source, StoredGame } from "@/lib/types";
 
 export interface ImportState {
   running: boolean;
@@ -15,8 +16,9 @@ export interface ImportState {
 
 export interface QueueState {
   paused: boolean;
-  current?: string;
-  progress?: number;
+  /** Games being reviewed right now -> progress 0..1. */
+  active: Record<string, number>;
+  engines: number;
   remaining: number;
 }
 
@@ -53,8 +55,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [importState, setImportState] = useState<ImportState>({ running: false, message: "" });
   const [paused, setPaused] = useState(false);
-  const [current, setCurrent] = useState<string>();
-  const [progress, setProgress] = useState<number>();
+  /** Games being reviewed right now -> progress 0..1. */
+  const [active, setActive] = useState<Record<string, number>>({});
   const [depth, setDepth] = useState(10);
   const abortRef = useRef<AbortController | null>(null);
   const priorityRef = useRef<string | null>(null);
@@ -148,49 +150,57 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ------------------------------------------------------------ background analysis queue
+  // One engine per core; each slot reviews one game at a time, newest games first.
   const pending = useMemo(
     () => games.filter((g) => !g.analysis).sort((a, b) => b.playedAt - a.playedAt),
     [games],
   );
-  const busy = useRef(false);
+  const [engines] = useState(engineCount);
+  const slots = useRef<(string | null)[]>([]);
+  const cache = useRef<OpeningCache | null>(null);
 
   useEffect(() => {
-    if (!loaded || paused || busy.current || !pending.length) return;
-    const pick = pending.find((g) => g.id === priorityRef.current) ?? pending[0];
-    priorityRef.current = null;
-    busy.current = true;
-    const signal = { cancelled: false };
-    setCurrent(pick.id);
-    setProgress(0);
-    (async () => {
-      try {
-        const { getBrowserEngine } = await import("@/lib/engine");
-        const analysis = await analyzeGame(pick.pgn, pick.userColor, getBrowserEngine(), {
-          depth,
-          signal,
-          onProgress: (d, t) => setProgress(d / t),
-        });
+    if (!loaded || paused || !pending.length) return;
+    if (!slots.current.length) slots.current = Array(engines).fill(null);
+    const running = new Set(slots.current.filter(Boolean));
+    cache.current ??= new OpeningCache();
+
+    slots.current.forEach((slotGame, slot) => {
+      if (slotGame) return;
+      const waiting = pending.filter((g) => !running.has(g.id));
+      const pick = waiting.find((g) => g.id === priorityRef.current) ?? waiting[0];
+      if (!pick) return;
+      if (pick.id === priorityRef.current) priorityRef.current = null;
+      running.add(pick.id);
+      slots.current[slot] = pick.id;
+      setActive((a) => ({ ...a, [pick.id]: 0 }));
+      (async () => {
+        let analysis: GameAnalysis | null;
+        try {
+          analysis = await analyzeGame(pick.pgn, pick.userColor, getBrowserEngine(slot), {
+            depth,
+            cache: cache.current!,
+            onProgress: (d, t) => setActive((a) => (pick.id in a ? { ...a, [pick.id]: d / t } : a)),
+          });
+        } catch (e) {
+          console.error("analysis failed", pick.id, e);
+          // Mark it so the queue moves on instead of retrying a broken game forever.
+          analysis = { depth, evals: [], best: [], moves: [], accuracy: 0, peakWin: 0 };
+        }
         if (analysis) {
           const updated = { ...pick, analysis };
           await db.putGame(updated);
           setGames((prev) => prev.map((g) => (g.id === pick.id ? updated : g)));
         }
-      } catch (e) {
-        console.error("analysis failed", pick.id, e);
-        // Mark it so the queue moves on instead of retrying a broken game forever.
-        const broken = {
-          ...pick,
-          analysis: { depth, evals: [], best: [], moves: [], accuracy: 0, peakWin: 0 },
-        };
-        await db.putGame(broken);
-        setGames((prev) => prev.map((g) => (g.id === pick.id ? broken : g)));
-      } finally {
-        busy.current = false;
-        setCurrent(undefined);
-        setProgress(undefined);
-      }
-    })();
-  }, [loaded, paused, pending, depth, priorityTick]);
+        slots.current[slot] = null;
+        setActive((a) => {
+          const rest = { ...a };
+          delete rest[pick.id];
+          return rest;
+        });
+      })();
+    });
+  }, [loaded, paused, pending, depth, priorityTick, engines]);
 
   const value: Store = {
     loaded,
@@ -198,7 +208,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     games,
     accounts,
     importState,
-    queue: { paused, current, progress, remaining: pending.length },
+    queue: { paused, active, engines, remaining: pending.length },
     depth,
     setDepth,
     importAccount,

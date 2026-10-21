@@ -52,7 +52,7 @@ export function GameReview({ game, onBack }: { game: StoredGame; onBack: () => v
   }
 
   const mistakes = a?.moves.filter((m) => m.cls === "blunder" || m.cls === "mistake") ?? [];
-  const isAnalysing = queue.current === game.id;
+  const isAnalysing = game.id in queue.active;
 
   return (
     <div className="flex flex-col gap-4">
@@ -109,7 +109,7 @@ export function GameReview({ game, onBack }: { game: StoredGame; onBack: () => v
               <div className="flex flex-col gap-2 text-sm">
                 <p>This game hasn&apos;t been reviewed yet.</p>
                 {isAnalysing ? (
-                  <p className="text-slate-400">Analysing… {Math.round((queue.progress ?? 0) * 100)}%</p>
+                  <p className="text-slate-400">Analysing… {Math.round((queue.active[game.id] ?? 0) * 100)}%</p>
                 ) : (
                   <Button onClick={() => prioritize(game.id)}>Review this game next</Button>
                 )}
