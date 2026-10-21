@@ -86,7 +86,7 @@ export function GamesPanel({ openId, onOpen }: { openId: string | null; onOpen: 
                       {g.analysis.accuracy}% acc
                       {blunders ? <span className="block text-red-400">{blunders} blunder{blunders > 1 ? "s" : ""}</span> : null}
                     </>
-                  ) : queue.current === g.id ? (
+                  ) : g.id in queue.active ? (
                     "analysing…"
                   ) : (
                     "not reviewed"

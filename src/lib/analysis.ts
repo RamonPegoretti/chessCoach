@@ -1,5 +1,5 @@
 import { Chess, type PieceSymbol } from "chess.js";
-import type { Evaluator } from "./engine";
+import type { EngineResult, Evaluator } from "./engine";
 import { detectMotif, PIECE_VALUE } from "./motifs";
 import {
   MATE_SCORE,
@@ -62,8 +62,34 @@ async function evalPosition(chess: Chess, engine: Evaluator, depth: number) {
   return engine.evaluate(chess.fen(), depth);
 }
 
+/**
+ * Shared across games: opening positions repeat constantly (every 1.e4 e5 2.Nf3 game starts
+ * the same), so their evals are reused instead of searched again.
+ */
+export class OpeningCache {
+  private map = new Map<string, EngineResult>();
+  hits = 0;
+  constructor(private maxPly = 24, private maxSize = 200_000) {}
+
+  private key(fen: string, depth: number) {
+    // Drop the move counters: the same position reached in a different move order is the same.
+    return `${fen.split(" ").slice(0, 4).join(" ")}|${depth}`;
+  }
+  get(ply: number, fen: string, depth: number) {
+    if (ply > this.maxPly) return undefined;
+    const r = this.map.get(this.key(fen, depth));
+    if (r) this.hits++;
+    return r;
+  }
+  set(ply: number, fen: string, depth: number, r: EngineResult) {
+    if (ply > this.maxPly || this.map.size >= this.maxSize) return;
+    this.map.set(this.key(fen, depth), r);
+  }
+}
+
 export interface AnalyzeOptions {
   depth?: number;
+  cache?: OpeningCache;
   onProgress?: (done: number, total: number) => void;
   signal?: { cancelled: boolean };
 }
@@ -88,7 +114,12 @@ export async function analyzeGame(
   const best: string[] = [];
   for (let i = 0; i <= history.length; i++) {
     if (opts.signal?.cancelled) return null;
-    const r = await evalPosition(replay, engine, depth);
+    const fen = replay.fen();
+    let r = opts.cache?.get(i, fen, depth);
+    if (!r) {
+      r = await evalPosition(replay, engine, depth);
+      opts.cache?.set(i, fen, depth, r);
+    }
     evals.push(replay.turn() === "w" ? r.score : -r.score);
     best.push(r.bestmove);
     opts.onProgress?.(i + 1, history.length + 1);

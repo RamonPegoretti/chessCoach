@@ -31,7 +31,7 @@ export class UciEvaluator implements Evaluator {
 
   constructor(private send: (cmd: string) => void) {
     send("uci");
-    send("setoption name Hash value 32");
+    send("setoption name Hash value 16");
     send("isready");
   }
 
@@ -67,15 +67,21 @@ export class UciEvaluator implements Evaluator {
   }
 }
 
-let browserEngine: UciEvaluator | null = null;
+/** How many engines to run at once: one per core, leaving one for the page, capped for memory. */
+export function engineCount(): number {
+  const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 2 : 2;
+  return Math.max(1, Math.min(6, cores - 1));
+}
 
-/** The Stockfish WASM engine, running in a Web Worker. Browser only. */
-export function getBrowserEngine(): UciEvaluator {
-  if (!browserEngine) {
+const browserEngines: UciEvaluator[] = [];
+
+/** The i-th Stockfish WASM engine, each in its own Web Worker. Browser only. */
+export function getBrowserEngine(i = 0): UciEvaluator {
+  if (!browserEngines[i]) {
     const worker = new Worker("/engine/stockfish-19-lite-single.js");
-    browserEngine = new UciEvaluator((cmd) => worker.postMessage(cmd));
-    const engine = browserEngine;
+    const engine = new UciEvaluator((cmd) => worker.postMessage(cmd));
     worker.onmessage = (e: MessageEvent) => engine.receive(String(e.data));
+    browserEngines[i] = engine;
   }
-  return browserEngine;
+  return browserEngines[i];
 }
