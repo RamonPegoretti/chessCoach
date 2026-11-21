@@ -1,11 +1,14 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import * as db from "@/lib/db";
 import type { Account } from "@/lib/db";
 import { accountKey, importChesscom, importLichess, parsePgnText } from "@/lib/importers";
 import { analyzeGame } from "@/lib/analysis";
 import type { Source, StoredGame } from "@/lib/types";
+import { buildCourse, loadProgress, saveProgress, type Module, type Outcome, type Progress } from "@/lib/course";
+import { buildProfile, type Profile } from "@/lib/profile";
+import { buildStory, type Story } from "@/lib/story";
 
 export interface ImportState {
   running: boolean;
@@ -36,6 +39,13 @@ interface Store {
   removeAccount: (a: Account) => Promise<void>;
   setPaused: (p: boolean) => void;
   prioritize: (id: string) => void;
+  loadDemo: () => Promise<void>;
+  profile: Profile;
+  story: Story | null;
+  course: Module[];
+  progress: Progress;
+  recordPuzzle: (id: string, outcome: Outcome) => void;
+  markLesson: (id: string) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -60,11 +70,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const priorityRef = useRef<string | null>(null);
   const [priorityTick, setPriorityTick] = useState(0);
 
+  const [courseProgress, setProgress_] = useState<Progress>({ puzzles: {}, lessons: {} });
+  const updateProgress = useCallback((f: (p: Progress) => Progress) => {
+    setProgress_((prev) => {
+      const next = f(prev);
+      saveProgress(next);
+      return next;
+    });
+  }, []);
+  const recordPuzzle = useCallback(
+    (id: string, outcome: Outcome) =>
+      // Keep the best result: a puzzle solved first time stays solved.
+      updateProgress((p) => (p.puzzles[id] === "first" ? p : { ...p, puzzles: { ...p.puzzles, [id]: outcome } })),
+    [updateProgress],
+  );
+  const markLesson = useCallback(
+    (id: string) => updateProgress((p) => ({ ...p, lessons: { ...p.lessons, [id]: true } })),
+    [updateProgress],
+  );
+
   useEffect(() => {
     Promise.all([db.allGames(), db.allAccounts()]).then(([g, a]) => {
       setGames(g);
       setInitialCount(g.length);
       setAccounts(a);
+      setProgress_(loadProgress());
       setLoaded(true);
     });
   }, []);
@@ -80,6 +110,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return [...map.values()];
     });
   }, []);
+
+  const loadDemo = useCallback(async () => {
+    const res = await fetch("/demo-games.json");
+    const demo = (await res.json()) as StoredGame[];
+    await db.putGames(demo);
+    await db.putAccount({ id: "demo", source: "pgn", username: "Demo player", lastSync: Date.now() });
+    mergeGames(demo);
+    setAccounts(await db.allAccounts());
+  }, [mergeGames]);
 
   const importAccount = useCallback(
     async (source: Exclude<Source, "pgn">, username: string) => {
@@ -148,10 +187,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ------------------------------------------------------------ background analysis queue
-  const pending = useMemo(
-    () => games.filter((g) => !g.analysis).sort((a, b) => b.playedAt - a.playedAt),
-    [games],
-  );
+  const pending = useMemo(() => games.filter((g) => !g.analysis).sort((a, b) => b.playedAt - a.playedAt), [games]);
   const busy = useRef(false);
 
   useEffect(() => {
@@ -192,7 +228,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [loaded, paused, pending, depth, priorityTick]);
 
+  // Derived insights, recomputed when games change (deferred so the UI stays responsive).
+  const deferredGames = useDeferredValue(games);
+  const profile = useMemo(() => buildProfile(deferredGames), [deferredGames]);
+  const story = useMemo(() => buildStory(deferredGames, profile), [deferredGames, profile]);
+  const course = useMemo(() => buildCourse(deferredGames, profile), [deferredGames, profile]);
+
   const value: Store = {
+    profile,
+    story,
+    course,
     loaded,
     initialCount,
     games,
@@ -207,6 +252,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     removeAccount,
     setPaused,
     prioritize,
+    loadDemo,
+    progress: courseProgress,
+    recordPuzzle,
+    markLesson,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

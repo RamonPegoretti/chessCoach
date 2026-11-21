@@ -1,112 +1,96 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Chess } from "chess.js";
-import { Chessboard } from "react-chessboard";
+import { allPuzzles } from "@/lib/course";
+import { MOTIF_LABEL } from "@/lib/labels";
+import type { Motif, Phase } from "@/lib/types";
 import { useStore } from "./store";
-import { Button, Card } from "./ui";
+import { PuzzleTrainer } from "./PuzzleTrainer";
+import { EmptyState, PageHeader } from "./ui";
 
-/** Puzzles built from your own blunders: find the move you missed. */
+/** Every puzzle from your own games, with filters. */
 export function TrainPanel() {
-  const { games } = useStore();
-  const puzzles = useMemo(
+  const { games, progress } = useStore();
+  const puzzles = useMemo(() => allPuzzles(games), [games]);
+  const [motif, setMotif] = useState<Motif | "all">("all");
+  const [phase, setPhase] = useState<Phase | "all">("all");
+  const [hideSolved, setHideSolved] = useState(false);
+
+  const motifs = useMemo(() => {
+    const counts = new Map<Motif, number>();
+    for (const p of puzzles) if (p.move.motif) counts.set(p.move.motif, (counts.get(p.move.motif) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [puzzles]);
+
+  const filtered = useMemo(
     () =>
-      games
-        .filter((g) => g.analysis)
-        .sort((a, b) => b.playedAt - a.playedAt)
-        .flatMap((g) =>
-          g.analysis!.moves
-            .filter((m) => (m.cls === "blunder" || m.cls === "mistake") && m.bestUci && m.motif !== "positional")
-            .map((m) => ({ game: g, move: m })),
-        ),
-    [games],
+      puzzles.filter(
+        (p) =>
+          (motif === "all" || p.move.motif === motif) &&
+          (phase === "all" || p.move.phase === phase) &&
+          (!hideSolved || progress.puzzles[p.id] !== "first"),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [puzzles, motif, phase, hideSolved],
   );
-  const [index, setIndex] = useState(0);
-  const [status, setStatus] = useState<"solving" | "wrong" | "solved" | "shown">("solving");
-  const [fen, setFen] = useState<string | null>(null);
+  const solved = puzzles.filter((p) => progress.puzzles[p.id] === "first").length;
 
   if (!puzzles.length) {
     return (
-      <Card>
-        No puzzles yet. Once some of your games are reviewed, the positions where you went wrong show up here so you
-        can practise them.
-      </Card>
+      <EmptyState title="No puzzles yet">
+        Once some of your games are reviewed, every position where you went wrong becomes a puzzle here.
+      </EmptyState>
     );
   }
 
-  const { game, move } = puzzles[index % puzzles.length];
-  const position = fen ?? move.fenBefore;
-  const toMove = move.fenBefore.split(" ")[1] === "w" ? "white" : "black";
-
-  const next = () => {
-    setIndex((i) => i + 1);
-    setStatus("solving");
-    setFen(null);
-  };
-
-  const onDrop = ({ sourceSquare, targetSquare }: { sourceSquare: string; targetSquare: string | null }) => {
-    if (!targetSquare || status === "solved" || status === "shown") return false;
-    const chess = new Chess(move.fenBefore);
-    let played;
-    try {
-      played = chess.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
-    } catch {
-      return false;
-    }
-    const uci = played.from + played.to + (played.promotion ?? "");
-    if (uci === move.bestUci || (move.bestUci.length === 4 && uci.slice(0, 4) === move.bestUci)) {
-      setFen(chess.fen());
-      setStatus("solved");
-      return true;
-    }
-    setStatus("wrong");
-    return false;
-  };
+  const chip = (active: boolean) =>
+    `rounded-full border px-3 py-1.5 text-xs transition ${active ? "border-brass bg-brass/10 text-brass" : "border-line text-muted hover:text-cream"}`;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,520px)_1fr]">
-      <Chessboard
-        options={{
-          position,
-          boardOrientation: toMove,
-          onPieceDrop: onDrop,
-          darkSquareStyle: { backgroundColor: "#4b7399" },
-          lightSquareStyle: { backgroundColor: "#eae9d2" },
-          arrows:
-            status === "shown"
-              ? [{ startSquare: move.bestUci.slice(0, 2), endSquare: move.bestUci.slice(2, 4), color: "rgba(16,185,129,0.8)" }]
-              : [],
-        }}
+    <div>
+      <PageHeader
+        eyebrow="Puzzles"
+        title="Fix your own mistakes"
+        sub={
+          <>
+            {puzzles.length} positions from your games where a better move was there.{" "}
+            <span className="tabular text-cream">{solved}</span> solved on the first try.
+          </>
+        }
       />
-      <Card className="flex flex-col gap-3 text-sm">
-        <div className="text-xs text-slate-400">
-          Puzzle {(index % puzzles.length) + 1} of {puzzles.length} · from your game vs{" "}
-          {game.userColor === "w" ? game.black : game.white}, {new Date(game.playedAt).toLocaleDateString()}
+      <div className="mb-6 flex flex-col gap-3">
+        <div className="flex flex-wrap gap-2">
+          <button className={chip(motif === "all")} onClick={() => setMotif("all")}>
+            All themes
+          </button>
+          {motifs.map(([m, n]) => (
+            <button key={m} className={chip(motif === m)} onClick={() => setMotif(m)}>
+              {MOTIF_LABEL[m].label} <span className="tabular opacity-60">{n}</span>
+            </button>
+          ))}
         </div>
-        <p className="text-base">
-          {toMove === "white" ? "White" : "Black"} to move. In the game you played{" "}
-          <span className="font-semibold text-red-400">{move.san}</span>. Find the better move.
-        </p>
-        {status === "wrong" && <p className="text-orange-400">Not that one. Try again.</p>}
-        {status === "solved" && (
-          <p className="text-emerald-400">
-            Correct, {move.bestSan}! {move.explanation}
-          </p>
-        )}
-        {status === "shown" && (
-          <p className="text-slate-300">
-            The move was <span className="font-semibold text-emerald-400">{move.bestSan}</span>. {move.explanation}
-          </p>
-        )}
-        <div className="flex gap-2">
-          {status !== "solved" && status !== "shown" && (
-            <Button variant="ghost" onClick={() => setStatus("shown")}>
-              Show answer
-            </Button>
-          )}
-          <Button onClick={next}>Next puzzle</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {(["all", "opening", "middlegame", "endgame"] as const).map((ph) => (
+            <button key={ph} className={chip(phase === ph)} onClick={() => setPhase(ph)}>
+              {ph === "all" ? "Any phase" : ph[0].toUpperCase() + ph.slice(1)}
+            </button>
+          ))}
+          <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs text-muted">
+            <input
+              type="checkbox"
+              className="accent-[#e0ad4f]"
+              checked={hideSolved}
+              onChange={(e) => setHideSolved(e.target.checked)}
+            />
+            Hide solved
+          </label>
         </div>
-      </Card>
+      </div>
+      {filtered.length ? (
+        <PuzzleTrainer key={`${motif}|${phase}|${hideSolved}`} puzzles={filtered} />
+      ) : (
+        <EmptyState title="Nothing left here">No puzzles match these filters. Nice work.</EmptyState>
+      )}
     </div>
   );
 }

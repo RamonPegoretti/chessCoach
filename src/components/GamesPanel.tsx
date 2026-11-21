@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { useStore } from "./store";
-import { Card, RESULT_STYLE } from "./ui";
+import { EmptyState, PageHeader, RESULT_STYLE } from "./ui";
 import { GameReview } from "./GameReview";
+import type { Go } from "./App";
 
 const PAGE = 50;
 
-export function GamesPanel({ openId, onOpen }: { openId: string | null; onOpen: (id: string | null) => void }) {
+export function GamesPanel({ openId, go }: { openId: string | null; go: Go }) {
   const { games, queue } = useStore();
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<"all" | "win" | "loss" | "draw">("all");
@@ -28,17 +29,22 @@ export function GamesPanel({ openId, onOpen }: { openId: string | null; onOpen: 
   }, [games, query, result]);
 
   const open = games.find((g) => g.id === openId);
-  if (open) return <GameReview game={open} onBack={() => onOpen(null)} />;
+  if (open) return <GameReview game={open} onBack={() => go("games")} />;
 
   if (!games.length) {
-    return <Card>No games yet. Import an account or paste a PGN first.</Card>;
+    return <EmptyState title="No games yet">Import an account or paste a PGN first.</EmptyState>;
   }
 
   return (
-    <Card>
-      <div className="flex flex-wrap items-center gap-2">
+    <div>
+      <PageHeader
+        eyebrow="Games"
+        title="Every game, reviewed"
+        sub={`${games.length.toLocaleString()} games. Click one to replay it with the engine's comments.`}
+      />
+      <div className="sticky top-14 z-10 -mx-1 flex flex-wrap items-center gap-2 bg-ink/90 px-1 py-3 backdrop-blur md:top-0">
         <input
-          className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          className="min-w-0 flex-1 rounded-full border border-line bg-panel px-4 py-2.5 text-sm outline-none placeholder:text-faint focus:border-brass"
           placeholder="Search opening or opponent"
           value={query}
           onChange={(e) => {
@@ -46,62 +52,77 @@ export function GamesPanel({ openId, onOpen }: { openId: string | null; onOpen: 
             setLimit(PAGE);
           }}
         />
-        <select
-          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
-          value={result}
-          onChange={(e) => setResult(e.target.value as typeof result)}
-        >
-          <option value="all">All results</option>
-          <option value="win">Wins</option>
-          <option value="loss">Losses</option>
-          <option value="draw">Draws</option>
-        </select>
+        <div className="flex rounded-full border border-line bg-panel p-1">
+          {(["all", "win", "draw", "loss"] as const).map((r) => (
+            <button
+              key={r}
+              onClick={() => setResult(r)}
+              className={`rounded-full px-3 py-1.5 text-xs capitalize transition ${result === r ? "bg-raised text-cream" : "text-muted hover:text-cream"}`}
+            >
+              {r === "all" ? "All" : r === "win" ? "Wins" : r === "loss" ? "Losses" : "Draws"}
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="mt-2 text-xs text-slate-400">{list.length} games</p>
-      <ul className="mt-2 divide-y divide-slate-800">
+      <p className="tabular mb-2 mt-2 text-xs text-faint">{list.length} games</p>
+      <ul className="overflow-hidden rounded-2xl border border-line">
         {list.slice(0, limit).map((g) => {
           const opp = g.userColor === "w" ? g.black : g.white;
           const blunders = g.analysis?.moves.filter((m) => m.cls === "blunder").length;
           return (
-            <li key={g.id}>
-              <button
-                onClick={() => onOpen(g.id)}
-                className="flex w-full items-center gap-3 py-2 text-left text-sm hover:bg-slate-800/40"
+            <li key={g.id} className="border-b border-line last:border-0">
+              <a
+                href={`#/games/${encodeURIComponent(g.id)}`}
+                className="flex items-center gap-4 bg-panel px-4 py-3.5 text-sm transition hover:bg-raised"
               >
-                <span className={`w-12 rounded px-1.5 py-0.5 text-center text-xs font-semibold ${RESULT_STYLE[g.result]}`}>
+                <span
+                  className={`w-12 shrink-0 rounded-full px-2 py-1 text-center text-[11px] font-semibold capitalize ${RESULT_STYLE[g.result]}`}
+                >
                   {g.result}
                 </span>
+                <span
+                  className={`h-3 w-3 shrink-0 rounded-full border border-faint ${g.userColor === "w" ? "bg-cream" : "bg-ink"}`}
+                  title={g.userColor === "w" ? "White" : "Black"}
+                />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate">
-                    vs {opp} {g.opponentRating ? <span className="text-slate-400">({g.opponentRating})</span> : null}
+                  <span className="block truncate text-cream">
+                    {opp} {g.opponentRating ? <span className="tabular text-faint">{g.opponentRating}</span> : null}
                   </span>
-                  <span className="block truncate text-xs text-slate-400">
-                    {g.userColor === "w" ? "White" : "Black"} · {g.opening} · {g.speed} ·{" "}
+                  <span className="block truncate text-xs text-muted">
+                    {g.opening} · <span className="capitalize">{g.speed}</span> ·{" "}
                     {new Date(g.playedAt).toLocaleDateString()}
                   </span>
                 </span>
-                <span className="text-right text-xs text-slate-400">
+                <span className="tabular shrink-0 text-right text-xs">
                   {g.analysis ? (
                     <>
-                      {g.analysis.accuracy}% acc
-                      {blunders ? <span className="block text-red-400">{blunders} blunder{blunders > 1 ? "s" : ""}</span> : null}
+                      <span className="text-cream">{g.analysis.accuracy}</span>
+                      <span className="text-faint"> acc</span>
+                      {blunders ? (
+                        <span className="block text-coral">
+                          {blunders} blunder{blunders > 1 ? "s" : ""}
+                        </span>
+                      ) : null}
                     </>
                   ) : queue.current === g.id ? (
-                    "analysing…"
+                    <span className="text-brass">reviewing…</span>
                   ) : (
-                    "not reviewed"
+                    <span className="text-faint">queued</span>
                   )}
                 </span>
-              </button>
+              </a>
             </li>
           );
         })}
       </ul>
       {list.length > limit && (
-        <button className="mt-3 w-full text-sm text-emerald-400" onClick={() => setLimit((l) => l + PAGE)}>
+        <button
+          className="mt-4 w-full rounded-full border border-line py-2.5 text-sm text-muted hover:text-cream"
+          onClick={() => setLimit((l) => l + PAGE)}
+        >
           Show more
         </button>
       )}
-    </Card>
+    </div>
   );
 }
