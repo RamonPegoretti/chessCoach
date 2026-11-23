@@ -43,53 +43,177 @@ export function CoursePanel({ moduleId, go }: { moduleId: string | null; go: Go 
           </Ring>
         }
       />
-      <ol className="relative flex flex-col gap-3">
-        {course.map((m, i) => {
-          const s = stats[i];
-          const isCurrent = i === current;
-          return (
-            <li key={m.id}>
-              <button
-                onClick={() => go("course", m.id)}
-                className={`group flex w-full items-center gap-5 rounded-2xl border p-5 text-left transition ${
-                  isCurrent ? "border-brass/50 bg-panel" : "border-line hover:border-faint hover:bg-panel"
-                }`}
-              >
-                <span
-                  className={`font-display grid h-12 w-12 shrink-0 place-items-center rounded-full text-lg ${
-                    s.done ? "bg-sage text-ink" : isCurrent ? "bg-brass text-ink" : "border border-line text-muted"
-                  }`}
-                >
-                  {s.done ? "✓" : i + 1}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-display text-xl text-cream">{m.title}</span>
-                    {isCurrent && (
-                      <span className="rounded-full bg-brass/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-brass">
-                        Up next
-                      </span>
-                    )}
-                  </span>
-                  <span className="mt-1 block text-sm text-muted">{m.evidence}</span>
-                  <span className="mt-3 flex items-center gap-3 text-xs text-faint">
-                    <span className="h-1 w-32 rounded-full bg-line">
-                      <span className="block h-1 rounded-full bg-sage" style={{ width: `${s.pct}%` }} />
-                    </span>
-                    <span className="tabular">
-                      {s.lesson ? "Lesson ✓" : "Lesson"} · {Math.min(s.solved, m.goal)}/{m.goal} puzzles
-                    </span>
-                  </span>
-                </span>
-                <span className="text-muted transition group-hover:translate-x-1 group-hover:text-cream">→</span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+      <CoursePath course={course} stats={stats} current={current} go={go} />
       <p className="mt-6 text-xs text-faint">
         The course updates as more games are reviewed. Chapters can change when your habits do.
       </p>
+    </div>
+  );
+}
+
+const ROW = 150;
+// Horizontal position of each node across the path column, as a fraction of its width: a gentle zig-zag.
+const SWING = [0.5, 0.76, 0.88, 0.76, 0.5, 0.24, 0.12, 0.24];
+
+/** A winding path of chapters, Duolingo style: done (green), current (gold, pulsing), upcoming (outlined). */
+function CoursePath({
+  course,
+  stats,
+  current,
+  go,
+}: {
+  course: Module[];
+  stats: ReturnType<typeof moduleProgress>[];
+  current: number;
+  go: Go;
+}) {
+  const n = course.length;
+  const height = (n + 1) * ROW;
+  const pts = Array.from({ length: n + 1 }, (_, i) => ({ x: SWING[i % SWING.length] * 100, y: i * ROW + ROW / 2 }));
+  const seg = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    `C${a.x},${a.y + ROW / 2} ${b.x},${b.y - ROW / 2} ${b.x},${b.y}`;
+  const full =
+    `M${pts[0].x},${pts[0].y} ` +
+    pts
+      .slice(1)
+      .map((p, i) => seg(pts[i], p))
+      .join(" ");
+  // Green up to the current chapter (or to the end if everything is done).
+  const reached = current === -1 ? n : current;
+  const done =
+    reached > 0
+      ? `M${pts[0].x},${pts[0].y} ` +
+        pts
+          .slice(1, reached + 1)
+          .map((p, i) => seg(pts[i], p))
+          .join(" ")
+      : "";
+  const allDone = current === -1;
+
+  return (
+    <div className="relative" style={{ height }}>
+      <div className="absolute inset-y-0 left-0 w-36 sm:w-72">
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox={`0 0 100 ${height}`}
+          preserveAspectRatio="none"
+          aria-hidden
+        >
+          <path
+            d={full}
+            fill="none"
+            stroke="var(--color-line)"
+            strokeWidth="10"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            d={full}
+            fill="none"
+            stroke="var(--color-faint)"
+            strokeWidth="2"
+            strokeDasharray="2 10"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          {done && (
+            <path
+              d={done}
+              fill="none"
+              stroke="var(--color-sage)"
+              strokeWidth="10"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+        </svg>
+      </div>
+
+      {course.map((m, i) => {
+        const s = stats[i];
+        const isCurrent = i === current;
+        const p = pts[i];
+        return (
+          <div key={m.id} className="absolute inset-x-0 flex items-center" style={{ top: p.y - 40, height: 80 }}>
+            <div className="relative h-full w-36 shrink-0 sm:w-72">
+              <button
+                onClick={() => go("course", m.id)}
+                aria-label={`Chapter ${i + 1}: ${m.title}`}
+                className="group absolute top-0 -translate-x-1/2"
+                style={{ left: `${p.x}%` }}
+              >
+                {isCurrent && <span className="animate-halo absolute inset-0 rounded-full bg-brass" />}
+                <span
+                  className={`font-display relative grid h-20 w-20 place-items-center rounded-full text-2xl transition group-hover:scale-105 group-active:scale-95 ${
+                    s.done
+                      ? "bg-sage text-ink shadow-[0_6px_0_#5f8a59]"
+                      : isCurrent
+                        ? "bg-brass text-ink shadow-[0_6px_0_#9a6f22]"
+                        : "border-2 border-line bg-panel text-muted shadow-[0_6px_0_#0c0a09]"
+                  }`}
+                >
+                  {s.done ? "✓" : i + 1}
+                  {!s.done && s.pct > 0 && (
+                    <svg className="absolute -inset-1.5 -rotate-90" viewBox="0 0 92 92" aria-hidden>
+                      <circle
+                        cx="46"
+                        cy="46"
+                        r="43"
+                        fill="none"
+                        stroke="var(--color-sage)"
+                        strokeWidth="4"
+                        strokeLinecap="round"
+                        strokeDasharray={270}
+                        strokeDashoffset={270 * (1 - s.pct / 100)}
+                      />
+                    </svg>
+                  )}
+                </span>
+              </button>
+            </div>
+            <button onClick={() => go("course", m.id)} className="min-w-0 flex-1 pl-2 text-left sm:pl-6">
+              <span className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`font-display text-lg sm:text-xl ${s.done || isCurrent ? "text-cream" : "text-muted"}`}
+                >
+                  {m.title}
+                </span>
+                {isCurrent && (
+                  <span className="rounded-full bg-brass/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-brass">
+                    {s.pct ? "Continue" : "Start here"}
+                  </span>
+                )}
+              </span>
+              <span className="mt-1 line-clamp-2 hidden text-sm text-muted sm:block">{m.evidence}</span>
+              <span className="tabular mt-1 block text-xs text-faint">
+                {s.lesson ? "Lesson ✓" : "Lesson"} · {Math.min(s.solved, m.goal)}/{m.goal} puzzles
+              </span>
+            </button>
+          </div>
+        );
+      })}
+
+      {/* Finish line */}
+      <div className="absolute inset-x-0 flex items-center" style={{ top: pts[n].y - 40, height: 80 }}>
+        <div className="relative h-full w-36 shrink-0 sm:w-72">
+          <span
+            className={`absolute top-0 grid h-20 w-20 -translate-x-1/2 place-items-center rounded-full text-3xl ${
+              allDone ? "bg-brass text-ink" : "border-2 border-dashed border-line text-faint"
+            }`}
+            style={{ left: `${pts[n].x}%` }}
+          >
+            ♔
+          </span>
+        </div>
+        <div className="pl-2 sm:pl-6">
+          <div className={`font-display text-lg sm:text-xl ${allDone ? "text-brass" : "text-faint"}`}>
+            {allDone ? "Course complete" : "Finish line"}
+          </div>
+          <div className="text-sm text-faint">
+            {allDone ? "New chapters appear as your games change." : `${n - Math.max(0, reached)} chapters to go`}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
