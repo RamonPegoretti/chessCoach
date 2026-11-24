@@ -9,6 +9,7 @@ import { TrainPanel } from "./TrainPanel";
 import { CoursePanel } from "./CoursePanel";
 import { StoryView } from "./StoryView";
 import { Landing } from "./Landing";
+import { StatsPanel } from "./StatsPanel";
 
 const NAV = [
   { id: "home", label: "Home", icon: "M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" },
@@ -20,6 +21,7 @@ const NAV = [
   },
   { id: "puzzles", label: "Puzzles", icon: "M9 4h6v3a2 2 0 1 0 0 4v0h3v6h-3a2 2 0 1 1-4 0H6v-6h3a2 2 0 1 0 0-4z" },
   { id: "games", label: "Games", icon: "M4 4h16v16H4z M4 12h16 M12 4v16" },
+  { id: "stats", label: "Stats", icon: "M5 20V11 M12 20V5 M19 20v-6 M3 20h18" },
   {
     id: "accounts",
     label: "Accounts",
@@ -91,6 +93,8 @@ function Shell() {
               <TrainPanel />
             ) : page === "games" ? (
               <GamesPanel openId={param} go={go} />
+            ) : page === "stats" ? (
+              <StatsPanel go={go} />
             ) : page === "accounts" ? (
               <ImportPanel go={go} />
             ) : (
@@ -167,7 +171,7 @@ function MobileHeader() {
 
 function BottomNav({ page, go }: { page: Route; go: Go }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-6 border-t border-line bg-ink/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-7 border-t border-line bg-ink/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
       {NAV.map((n) => (
         <button
           key={n.id}
