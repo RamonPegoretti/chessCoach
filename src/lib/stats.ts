@@ -217,7 +217,6 @@ export interface Stats {
     longestGame?: { game: StoredGame; moves: number };
     buckets: Bucket[];
   };
-  ratingSeries: { speed: Speed; points: { t: number; r: number }[] }[];
 }
 
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined);
@@ -310,7 +309,6 @@ export function buildStats(games: StoredGame[]): Stats {
   let shortestWin: Stats["length"]["shortestWin"];
   let longestGame: Stats["length"]["longestGame"];
   const oppRatings: number[] = [];
-  const series = new Map<Speed, { t: number; r: number }[]>();
 
   for (const g of games) {
     add(total, g.result);
@@ -364,11 +362,6 @@ export function buildStats(games: StoredGame[]): Stats {
         shortestWin = { game: g, moves: facts.moves };
       if (!longestGame || facts.moves > longestGame.moves) longestGame = { game: g, moves: facts.moves };
     }
-
-    if (g.rated && g.userRating) {
-      if (!series.has(g.speed)) series.set(g.speed, []);
-      series.get(g.speed)!.push({ t: g.playedAt, r: g.userRating });
-    }
   }
 
   const sortEnd = (m: Map<Ending, number>) =>
@@ -419,11 +412,25 @@ export function buildStats(games: StoredGame[]): Stats {
       longestGame,
       buckets: lenBuckets,
     },
-    ratingSeries: SPEED_ORDER.filter((s) => series.has(s)).map((speed) => ({
-      speed,
-      points: thinOut(series.get(speed)!),
-    })),
   };
+}
+
+export type Site = "chesscom" | "lichess" | "pgn";
+export const SITES: { id: Site; label: string }[] = [
+  { id: "chesscom", label: "Chess.com" },
+  { id: "lichess", label: "Lichess" },
+  { id: "pgn", label: "Imported PGN" },
+];
+
+/** Rating history per time control. Ratings from different sites are not comparable, so call this per site. */
+export function ratingSeries(games: StoredGame[]) {
+  const series = new Map<Speed, { t: number; r: number }[]>();
+  for (const g of games) {
+    if (!g.rated || !g.userRating) continue;
+    if (!series.has(g.speed)) series.set(g.speed, []);
+    series.get(g.speed)!.push({ t: g.playedAt, r: g.userRating });
+  }
+  return SPEED_ORDER.filter((s) => series.has(s)).map((speed) => ({ speed, points: thinOut(series.get(speed)!) }));
 }
 
 /** Keep the last rating of each day so long histories stay light to draw. */
