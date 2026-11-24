@@ -12,6 +12,8 @@ import {
   filterGames,
   pct,
   ratingSummaries,
+  ratingSeries,
+  SITES,
   score,
   type ColorFilter,
   type Period,
@@ -45,6 +47,15 @@ export function StatsPanel({ go }: { go: Go }) {
     [allSpeeds, f.speed],
   );
   const ratings = useMemo(() => ratingSummaries(allSpeeds), [allSpeeds]);
+  const bySite = useMemo(
+    () =>
+      SITES.map(({ id, label }) => {
+        const siteGames = allSpeeds.filter((g) => g.source === id);
+        const shown = f.speed === "all" ? siteGames : siteGames.filter((g) => g.speed === f.speed);
+        return { site: id, label, ratings: ratingSummaries(siteGames), series: ratingSeries(shown), n: siteGames.length };
+      }).filter((x) => x.n > 0),
+    [allSpeeds, f.speed],
+  );
   const s = useMemo(() => buildStats(filtered), [filtered]);
 
   const accountIds = useMemo(() => [...new Set(games.map((g) => g.account))], [games]);
@@ -119,13 +130,16 @@ export function StatsPanel({ go }: { go: Go }) {
         </div>
       ) : (
         <div className="mt-4 space-y-6">
-          {/* Rating cards */}
+          {/* Ratings, one section per site: Chess.com and Lichess ratings are on different scales. */}
+          {bySite.map(({ site, label, ratings: siteRatings, series }) => (
+            <Card key={site}>
+              <SectionTitle title={`${label} rating`} sub="Rated games only. Last rating of each day." />
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {ratings.map((r) => (
+            {siteRatings.map((r) => (
               <button
                 key={r.speed}
                 onClick={() => set("speed", f.speed === r.speed ? "all" : r.speed)}
-                className={`rounded-2xl border bg-panel p-4 text-left transition hover:border-faint ${f.speed === r.speed ? "border-brass" : "border-line"}`}
+                className={`rounded-2xl border bg-raised p-4 text-left transition hover:border-faint ${f.speed === r.speed ? "border-brass" : "border-line"}`}
               >
                 <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.12em] text-faint">
                   <span className="h-2 w-2 rounded-full" style={{ background: SPEED_COLOR[r.speed] }} />
@@ -159,19 +173,19 @@ export function StatsPanel({ go }: { go: Go }) {
             ))}
           </div>
 
-          {/* Rating chart */}
-          <Card>
-            <SectionTitle title="Rating over time" sub="Rated games only. Last rating of each day." />
-            <LineChart
-              series={s.ratingSeries.map((x) => ({
-                key: x.speed,
-                label: SPEED_LABEL[x.speed],
-                color: SPEED_COLOR[x.speed],
-                points: x.points.map((p) => ({ x: p.t, y: p.r })),
-              }))}
-              formatX={fmtDate}
-            />
-          </Card>
+              <div className="mt-5">
+                <LineChart
+                  series={series.map((x) => ({
+                    key: x.speed,
+                    label: SPEED_LABEL[x.speed],
+                    color: SPEED_COLOR[x.speed],
+                    points: x.points.map((p) => ({ x: p.t, y: p.r })),
+                  }))}
+                  formatX={fmtDate}
+                />
+              </div>
+            </Card>
+          ))}
 
           {/* Results + colors */}
           <div className="grid gap-6 lg:grid-cols-2">
