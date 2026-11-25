@@ -22,15 +22,78 @@ export interface Style {
   openness: number;
 }
 
-export const STYLE_LABEL: Record<keyof Style, { name: string; low: string; high: string }> = {
-  aggression: { name: "Aggression", low: "Patient", high: "Attacking" },
-  sacrifice: { name: "Sacrifices", low: "Materialist", high: "Romantic" },
-  chaos: { name: "Complexity", low: "Calm positions", high: "Chaos" },
-  precision: { name: "Precision", low: "Loose", high: "Surgical" },
-  endgame: { name: "Endgames", low: "Avoids them", high: "Grinder" },
-  decisive: { name: "Fighting spirit", low: "Solid", high: "No draws" },
-  openness: { name: "Openings", low: "Closed", high: "Open & sharp" },
+/**
+ * Each style axis runs between two opposite poles; neither end is "better".
+ * `lowWord`/`highWord` are adjectives used in sentences ("You're an attacking player", "Leans calm").
+ */
+export const STYLE_LABEL: Record<
+  keyof Style,
+  { name: string; low: string; high: string; lowWord: string; highWord: string; hint: string }
+> = {
+  aggression: {
+    name: "Aggression",
+    low: "Patient",
+    high: "Attacking",
+    lowWord: "patient",
+    highWord: "attacking",
+    hint: "Captures, checks and moves near the enemy king",
+  },
+  sacrifice: {
+    name: "Sacrifices",
+    low: "Materialist",
+    high: "Romantic",
+    lowWord: "materialist",
+    highWord: "romantic",
+    hint: "How often you give up material on purpose",
+  },
+  chaos: {
+    name: "Complexity",
+    low: "Calm",
+    high: "Chaotic",
+    lowWord: "calm",
+    highWord: "chaotic",
+    hint: "How wildly the evaluation swings in your games",
+  },
+  precision: {
+    name: "Precision",
+    low: "Loose",
+    high: "Surgical",
+    lowWord: "loose",
+    highWord: "surgical",
+    hint: "Your accuracy, and how rarely you blunder",
+  },
+  endgame: {
+    name: "Endgames",
+    low: "Avoids them",
+    high: "Grinder",
+    lowWord: "endgame-shy",
+    highWord: "grinding",
+    hint: "How often you reach endgames, and how well you play them",
+  },
+  decisive: {
+    name: "Fighting spirit",
+    low: "Solid",
+    high: "No draws",
+    lowWord: "solid",
+    highWord: "combative",
+    hint: "How rarely your games end in a draw",
+  },
+  openness: {
+    name: "Openings",
+    low: "Closed",
+    high: "Open & sharp",
+    lowWord: "quiet",
+    highWord: "sharp",
+    hint: "1.e4 and gambits versus quieter openings",
+  },
 };
+
+/** How strongly a 0–1 style value leans away from the middle. */
+export function styleLean(v: number): { side: "low" | "high" | "mid"; strength: 0 | 1 | 2 | 3 } {
+  const d = Math.abs(v - 0.5);
+  if (d < 0.08) return { side: "mid", strength: 0 };
+  return { side: v > 0.5 ? "high" : "low", strength: d < 0.2 ? 1 : d < 0.35 ? 2 : 3 };
+}
 
 export interface Legend {
   id: string;
