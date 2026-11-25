@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { STYLE_LABEL, type Story, type Style } from "@/lib/story";
+import { STYLE_LABEL, styleLean, type Story, type Style } from "@/lib/story";
 import { MOTIF_LABEL } from "@/lib/labels";
 import { useStore } from "./store";
 import { MomentBoard } from "./MomentBoard";
@@ -225,28 +225,7 @@ function buildSlides(s: Story, name: string, go: Go): React.ReactNode[] {
     </div>,
   );
 
-  slides.push(
-    <div key="style">
-      <Rise>
-        <Kicker>Your style</Kicker>
-      </Rise>
-      <Rise delay={150}>
-        <h2 className="font-display mt-4 text-4xl md:text-5xl">How you play, in seven lines.</h2>
-      </Rise>
-      <div className="mt-10 flex flex-col gap-5">
-        {(Object.keys(STYLE_LABEL) as (keyof Style)[]).map((k, idx) => (
-          <Rise key={k} delay={300 + idx * 90}>
-            <StyleBar k={k} v={s.style[k]} legend={s.legend.style[k]} />
-          </Rise>
-        ))}
-      </div>
-      <Rise delay={1000}>
-        <p className="mt-8 flex items-center gap-2 text-xs text-muted">
-          <span className="inline-block h-3 w-0.5 bg-cream/60" /> marks {s.legend.name}
-        </p>
-      </Rise>
-    </div>,
-  );
+  slides.push(<StyleSlide key="style" s={s} />);
 
   slides.push(
     <div key="legend" className="text-center">
@@ -417,20 +396,100 @@ function buildSlides(s: Story, name: string, go: Go): React.ReactNode[] {
   return slides;
 }
 
-function StyleBar({ k, v, legend }: { k: keyof Style; v: number; legend: number }) {
+const STYLE_KEYS = Object.keys(STYLE_LABEL) as (keyof Style)[];
+
+function leanWord(k: keyof Style, v: number) {
   const l = STYLE_LABEL[k];
+  const { side, strength } = styleLean(v);
+  if (side === "mid") return "Balanced";
+  const word = side === "high" ? l.highWord : l.lowWord;
+  return strength === 1 ? `Leans ${word}` : strength === 3 ? `Very ${word}` : word[0].toUpperCase() + word.slice(1);
+}
+
+function StyleSlide({ s }: { s: Story }) {
+  // Strongest traits first: the ones furthest from the middle define the player.
+  const keys = [...STYLE_KEYS].sort((a, b) => Math.abs(s.style[b] - 0.5) - Math.abs(s.style[a] - 0.5));
+  const defining = keys
+    .filter((k) => styleLean(s.style[k]).strength >= 2)
+    .slice(0, 2)
+    .map((k) => (s.style[k] > 0.5 ? STYLE_LABEL[k].highWord : STYLE_LABEL[k].lowWord));
+  const article = defining.length && /^[aeiou]/i.test(defining[0]) ? "an" : "a";
   return (
     <div>
-      <div className="flex items-baseline justify-between text-sm">
-        <span className="text-cream">{l.name}</span>
-        <span className="text-xs text-muted">{v >= 0.5 ? l.high : l.low}</span>
+      <Rise>
+        <Kicker>Your style</Kicker>
+      </Rise>
+      <Rise delay={150}>
+        <h2 className="font-display mt-4 text-4xl leading-tight md:text-5xl">
+          {defining.length ? (
+            <>
+              You&apos;re {article}{" "}
+              {defining.map((w, idx) => (
+                <span key={w}>
+                  {idx > 0 && ", "}
+                  <span className="text-brass">{w}</span>
+                </span>
+              ))}{" "}
+              player.
+            </>
+          ) : (
+            <>
+              You&apos;re a <span className="text-brass">balanced</span>, all-round player.
+            </>
+          )}
+        </h2>
+      </Rise>
+      <Rise delay={300}>
+        <p className="mt-3 max-w-xl text-sm text-muted">
+          Each line runs between two opposite styles. Neither end is better; the dot shows where you lean.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
+          <span className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-full bg-brass" /> You
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-cream/70" /> {s.legend.name}, your
+            closest legend
+          </span>
+        </div>
+      </Rise>
+      <div className="mt-6 flex flex-col gap-5">
+        {keys.map((k, idx) => (
+          <Rise key={k} delay={400 + idx * 80}>
+            <StyleBar k={k} v={s.style[k]} legend={s.legend.style[k]} />
+          </Rise>
+        ))}
       </div>
-      <div className="relative mt-2 h-2 rounded-full bg-cream/10">
-        <div
-          className="h-2 rounded-full bg-brass transition-all duration-1000"
-          style={{ width: `${Math.max(4, v * 100)}%` }}
-        />
-        <div className="absolute -top-1 h-4 w-0.5 bg-cream/60" style={{ left: `${legend * 100}%` }} />
+    </div>
+  );
+}
+
+function StyleBar({ k, v, legend }: { k: keyof Style; v: number; legend: number }) {
+  const l = STYLE_LABEL[k];
+  const { side } = styleLean(v);
+  const pole = (on: boolean) => (on ? "font-semibold text-cream" : "text-faint");
+  const pct = (x: number) => `${Math.min(97, Math.max(3, x * 100))}%`;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[15px] text-cream">{l.name}</span>
+        <span className="shrink-0 text-sm font-semibold text-brass">{leanWord(k, v)}</span>
+      </div>
+      <div className="mt-0.5 text-xs text-faint">{l.hint}</div>
+      <div className="mt-2 grid grid-cols-[4.5rem_1fr_4.5rem] items-center gap-2.5 text-xs sm:grid-cols-[6rem_1fr_6rem]">
+        <span className={`text-right leading-tight ${pole(side === "low")}`}>{l.low}</span>
+        <div className="relative h-1.5 rounded-full bg-cream/10">
+          <div className="absolute -top-[3px] left-1/2 h-3 w-px bg-cream/25" />
+          <div
+            className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-cream/70"
+            style={{ left: pct(legend) }}
+          />
+          <div
+            className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brass shadow-[0_0_0_4px_rgba(224,173,79,0.2)] transition-[left] duration-1000"
+            style={{ left: pct(v) }}
+          />
+        </div>
+        <span className={`leading-tight ${pole(side === "high")}`}>{l.high}</span>
       </div>
     </div>
   );
